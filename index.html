@@ -123,6 +123,18 @@ legend{font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; font-we
 .rule{margin:0; font-size:.88rem; color:var(--fg)}
 .rule b{color:var(--gold)}
 
+.people{display:flex; flex-wrap:wrap; gap:8px; align-items:center}
+.people-label{width:100%; font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; font-weight:700; color:var(--muted)}
+.chip{
+  font:inherit; font-weight:700; font-size:.88rem; cursor:pointer;
+  padding:7px 13px; border-radius:999px;
+  border:1.5px solid var(--line); background:var(--bg); color:var(--muted);
+}
+.chip:hover{color:var(--fg); border-color:var(--fg)}
+.chip.on, .chip.on:hover{background:var(--accent-soft); border-color:var(--accent); color:var(--accent); cursor:default}
+.chip.add, .chip.add:hover{border-style:dashed; border-color:var(--gold); color:var(--gold); background:transparent}
+.chip:disabled{cursor:default; opacity:1}
+
 .actions{display:flex; flex-wrap:wrap; gap:10px; align-items:center}
 button{font:inherit; font-weight:700; cursor:pointer; border-radius:3px; border:1.5px solid transparent; padding:11px 20px}
 button[disabled]{cursor:not-allowed; opacity:.55}
@@ -191,9 +203,10 @@ footer{color:var(--muted); font-size:.8rem; text-align:center}
   <section class="card">
     <h2>Deine Anmeldung</h2>
     <div id="gate" class="notice" hidden></div>
+    <div id="people" class="people" hidden></div>
     <div id="done" class="done" hidden>
       <span class="tick">✓</span>
-      <p><strong>Du bist angemeldet.</strong><span id="done-text"></span></p>
+      <p><strong id="done-head">Du bist angemeldet.</strong><span id="done-text"></span></p>
     </div>
     <form id="form">
       <div style="display:flex; flex-direction:column; gap:16px">
@@ -227,12 +240,11 @@ footer{color:var(--muted); font-size:.8rem; text-align:center}
 
         <div class="actions">
           <button type="submit" class="btn-primary" id="save">Anmeldung speichern</button>
-          <button type="button" class="btn-quiet" id="remove" hidden>Abmelden</button>
           <span id="msg"></span>
         </div>
       </div>
     </form>
-    <p class="hint">Wer sich sonst noch angemeldet hat, siehst du hier nicht — die Liste hat nur der Veranstalter. Deine eigene Anmeldung kannst du auf diesem Gerät jederzeit ändern.</p>
+    <p class="hint">Wer sich sonst noch angemeldet hat, siehst du hier nicht — die Liste hat nur der Veranstalter. Deine eigene Anmeldung kannst du auf diesem Gerät jederzeit ändern: Wenn du doch nicht kannst, stell oben auf „Kann nicht“ und speichere nochmal.</p>
   </section>
 
   <section class="card" id="pay-card" hidden>
@@ -277,22 +289,46 @@ footer{color:var(--muted); font-size:.8rem; text-align:center}
   var myId=null, mine=null;
 
   function $(id){ return document.getElementById(id); }
-  var form=$("form"), saveBtn=$("save"), removeBtn=$("remove"), msg=$("msg"), gate=$("gate"), done=$("done");
+  var form=$("form"), saveBtn=$("save"), msg=$("msg"), gate=$("gate"), done=$("done");
 
   function get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
   function put(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
   function drop(k){ try{ localStorage.removeItem(k); }catch(e){} }
   function note(el,text,cls){ el.textContent=text||""; el.className=cls||""; }
 
-  myId = get("biermeile_id");
-  if(!myId){
-    myId = "u" + Date.now().toString(36) + Math.random().toString(36).slice(2,10);
-    put("biermeile_id", myId);
-  }
   var OWN = "Eigenes Getränk";
-  try{ mine = JSON.parse(get("biermeile_entry") || "null"); }catch(e){ mine=null; }
+  var list = [];   /* alle Anmeldungen, die von diesem Geraet aus gemacht wurden */
+
+  function newId(){ return "u" + Date.now().toString(36) + Math.random().toString(36).slice(2,10); }
+  function findEntry(id){
+    for(var i=0;i<list.length;i++){ if(list[i].id===id) return list[i]; }
+    return null;
+  }
+  function saveList(){ put("biermeile_list", JSON.stringify(list)); }
+
   /* Fruehere Anmeldungen hiessen noch "Eigenes Bier". */
-  if(mine && mine.auswahl==="Eigenes Bier"){ mine.auswahl=OWN; if(mine.bier==="Eigenes Bier") mine.bier=OWN; }
+  function fixOld(e){
+    if(e && e.auswahl==="Eigenes Bier"){ e.auswahl=OWN; if(e.bier==="Eigenes Bier") e.bier=OWN; }
+    return e;
+  }
+
+  (function loadList(){
+    var raw=null;
+    try{ raw = JSON.parse(get("biermeile_list") || "null"); }catch(e){ raw=null; }
+    if(raw && raw.length){
+      for(var i=0;i<raw.length;i++){ if(raw[i] && raw[i].id) list.push(fixOld(raw[i])); }
+      return;
+    }
+    /* Umzug vom alten Format: genau eine Anmeldung, Kennung separat gespeichert */
+    var oldId=get("biermeile_id"), oldEntry=null;
+    try{ oldEntry = JSON.parse(get("biermeile_entry") || "null"); }catch(e){ oldEntry=null; }
+    if(oldId && oldEntry){
+      oldEntry.id=oldId;
+      list.push(fixOld(oldEntry));
+      saveList();
+      drop("biermeile_entry");
+    }
+  })();
 
   function statusVal(){ var r=form.querySelector('input[name=status]:checked'); return r?r.value:"ja"; }
   function drinkVal(){ var r=form.querySelector('input[name=drink]:checked'); return r?r.value:"Dinkelacker Privat"; }
@@ -593,26 +629,83 @@ footer{color:var(--muted); font-size:.8rem; text-align:center}
   }
 
   /* ---------- eigener Stand ---------- */
-  function showMine(){
+  /* Liste der Namen oben im Kasten: einer davon ist gerade im Formular. */
+  function renderList(){
+    var box=$("people");
+    while(box.firstChild) box.removeChild(box.firstChild);
+    if(!list.length){ box.hidden=true; return; }
+    box.hidden=false;
+
+    var lab=document.createElement("span");
+    lab.className="people-label";
+    lab.textContent="Von diesem Gerät angemeldet";
+    box.appendChild(lab);
+
+    list.forEach(function(e){
+      var b=document.createElement("button");
+      b.type="button";
+      b.className = "chip" + (e.id===myId ? " on" : "");
+      b.textContent = e.name || "Ohne Namen";
+      if(e.id===myId){ b.disabled=true; }
+      else { b.addEventListener("click", function(){ select(e.id, true); }); }
+      box.appendChild(b);
+    });
+
+    var extra=document.createElement("button");
+    extra.type="button";
+    if(mine){
+      extra.className="chip add";
+      extra.textContent="+ Noch jemanden anmelden";
+      extra.addEventListener("click", function(){ select(null, true); });
+    } else {
+      extra.className="chip on";
+      extra.textContent="Neue Anmeldung";
+      extra.disabled=true;
+    }
+    box.appendChild(extra);
+  }
+
+  /* Knopfbeschriftung, Bestaetigungskasten und Namensliste nachziehen. */
+  function refresh(){
+    saveBtn.textContent = mine ? "Änderungen speichern" : "Anmeldung speichern";
+    done.hidden = !mine;
+    if(mine){
+      $("done-head").textContent = list.length>1
+        ? (mine.name||"Diese Anmeldung") + " ist angemeldet."
+        : "Du bist angemeldet.";
+      $("done-text").textContent =
+        mine.status==="nein" ? " Die Absage ist angekommen und lässt sich unten noch ändern."
+        : mine.status==="vielleicht" ? " Das Vielleicht ist angekommen und lässt sich unten noch ändern."
+        : " Die Zusage ist angekommen und lässt sich unten noch ändern.";
+    }
+    toggleOwn();
+    renderList();
+  }
+
+  /* Formularfelder auf den gewaehlten Eintrag setzen. */
+  function fillForm(){
     if(mine){
       $("name").value=mine.name||"";
       $("note").value=mine.note||"";
       setRadio("status", mine.status||"ja");
       setRadio("drink", mine.auswahl||"Dinkelacker Privat");
-      if(mine.auswahl===OWN) $("own").value=mine.bier||"";
-      saveBtn.textContent="Änderungen speichern";
-      removeBtn.hidden=false;
-      done.hidden=false;
-      $("done-text").textContent =
-        mine.status==="nein" ? "Deine Absage ist angekommen. Du kannst sie unten noch ändern."
-        : mine.status==="vielleicht" ? "Dein Vielleicht ist angekommen. Du kannst es unten noch ändern."
-        : "Deine Zusage ist angekommen. Du kannst sie unten noch ändern.";
+      $("own").value = (mine.auswahl===OWN) ? (mine.bier||"") : "";
     } else {
-      saveBtn.textContent="Anmeldung speichern";
-      removeBtn.hidden=true;
-      done.hidden=true;
+      form.reset();
+      $("own").value="";
     }
-    toggleOwn();
+    refresh();
+  }
+
+  /* Eintrag wechseln; ohne Kennung wird eine neue Anmeldung begonnen. */
+  function select(id, focus){
+    myId = id || newId();
+    mine = findEntry(myId);
+    put("biermeile_current", myId);
+    note(msg,"");
+    fillForm();
+    /* Nur beim Wechseln ins Feld springen, nicht beim Laden der Seite. */
+    if(focus && !mine) $("name").focus();
   }
 
   function toggleOwn(){
@@ -648,9 +741,13 @@ footer{color:var(--muted); font-size:.8rem; text-align:center}
     }, function(res){
       saveBtn.disabled=false;
       if(res && res.ok){
-        mine=entry;
-        put("biermeile_entry", JSON.stringify(entry));
-        showMine();
+        entry.id=myId;
+        var ex=findEntry(myId);
+        if(ex){ for(var k in entry){ if(Object.prototype.hasOwnProperty.call(entry,k)) ex[k]=entry[k]; } }
+        else { list.push(entry); }
+        mine=findEntry(myId);
+        saveList();
+        refresh();
         note(msg,"Gespeichert.","saved");
       } else {
         note(msg,"Das hat nicht geklappt. Bitte nochmal versuchen.","err");
@@ -658,22 +755,6 @@ footer{color:var(--muted); font-size:.8rem; text-align:center}
     }, function(){
       saveBtn.disabled=false;
       note(msg,"Keine Verbindung zum Server. Nochmal auf Speichern tippen.","err");
-    });
-  });
-
-  removeBtn.addEventListener("click", function(){
-    removeBtn.disabled=true;
-    note(msg,"Meldet ab …");
-    call({action:"delete", id:myId}, function(res){
-      removeBtn.disabled=false;
-      if(res && res.ok){
-        mine=null; drop("biermeile_entry");
-        form.reset(); showMine();
-        note(msg,"Du bist abgemeldet.","saved");
-      } else { note(msg,"Abmelden hat nicht geklappt.","err"); }
-    }, function(){
-      removeBtn.disabled=false;
-      note(msg,"Keine Verbindung zum Server.","err");
     });
   });
 
@@ -685,7 +766,9 @@ footer{color:var(--muted); font-size:.8rem; text-align:center}
     Array.prototype.forEach.call(form.querySelectorAll("input, textarea, button"), function(el){ el.disabled=true; });
   }
 
-  showMine();
+  var startId = get("biermeile_current");
+  if(!findEntry(startId)) startId = list.length ? list[list.length-1].id : null;
+  select(startId);
   if(!ENDPOINT) lock("In der index.html fehlt oben noch die Adresse der Google-Web-App bei ENDPOINT.");
 })();
 </script>
